@@ -622,20 +622,28 @@
             }
         }
     </style>
-    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database.js"></script>
-    <script>
-        const firebaseConfig = {
-            apiKey: "AIzaSyC9tPt6qMlvVES1gUu66eD1sioiv0P-NEM",
-            authDomain: "pic-a-booth-41a40.firebaseapp.com",
-            databaseURL: "https://pic-a-booth-41a40-default-rtdb.firebaseio.com",
-            projectId: "pic-a-booth-41a40",
-            storageBucket: "pic-a-booth-41a40.appspot.com",
-            messagingSenderId: "679511538478",
-            appId: "1:679511538478:web:dc0fe55df5854996f598bf"
-        };
-        //Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
+    <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+    import { getDatabase, ref, push, onChildAdded } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+    
+    const firebaseConfig = {
+        apiKey: "AIzaSyC9tPt6qMlvVES1gUu66eD1sioiv0P-NEM",
+        authDomain: "pic-a-booth-41a40.firebaseapp.com",
+        databaseURL: "https://pic-a-booth-41a40-default-rtdb.firebaseio.com",
+        projectId: "pic-a-booth-41a40",
+        storageBucket: "pic-a-booth-41a40.firebasestorage.app",
+        messagingSenderId: "679511538478",
+        appId: "1:679511538478:web:dc0fe55df5854996f598bf"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app);
+    
+    // Make these available globally
+    window.firebaseDB = database;
+    window.firebaseRef = ref;
+    window.firebasePush = push;
+    window.firebaseOnChildAdded = onChildAdded;
     </script>
 </head>
 <body>
@@ -856,39 +864,19 @@
             ]
         };
 
-        //Firebase signalling
+        // Simple signaling server simulation
         const signaling = {
             send: function(roomCode, message) {
-                //Add to Firebase
-                firebase.database().ref(`rooms/${roomCode}`).push(message);
+                // Save the signaling message to Firebase
+                const roomRef = window.firebaseRef(window.firebaseDB, `rooms/${roomCode}`);
+                window.firebasePush(roomRef, message);
             },
-
             receive: function(roomCode, callback) {
-                //Listen to firebase
-                firebase.database().ref(`rooms/${roomCode}`).on('child_added', (snapshot) => {
+                // Listen for new signaling messages in Firebase
+                const roomRef = window.firebaseRef(window.firebaseDB, `rooms/${roomCode}`);
+                window.firebaseOnChildAdded(roomRef, (snapshot) => {
                     callback(snapshot.val());
                 });
-            }
-        };
-            
-            send: function(roomCode, message) {
-                if (!this.data[roomCode]) {
-                    this.data[roomCode] = [];
-                }
-                this.data[roomCode].push(message);
-            },
-            
-            receive: function(roomCode, callback) {
-                if (this.data[roomCode]) {
-                    const messages = this.data[roomCode].splice(0);
-                    messages.forEach(callback);
-                }
-            },
-            
-            poll: function(roomCode, callback) {
-                setInterval(() => {
-                    this.receive(roomCode, callback);
-                }, 1000);
             }
         };
 
@@ -1056,7 +1044,6 @@
                     document.getElementById('remoteCameraUnavailable').style.display = 'none';
                     isConnected = true;
                 };
-
                 
                 // Create data channel for synchronization
                 if (isHost) {
@@ -1069,6 +1056,7 @@
                         dataChannel.onmessage = handleDataChannelMessage;
                     };
                 }
+                
                 // Handle ICE candidates
                 peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
@@ -1079,7 +1067,21 @@
                     }
                 };
                 
-                //Start signalling
+                //Monitor connection state
+                peerConnection.onconnectionstatechange = () => {
+                    console.log('Connection state:', peerConnection.connectionState);
+                    if (peerConnection.connectionState === 'connected') {
+                        document.getElementById('friendStatus').textContent = 'Connected';
+                        document.getElementById('friendStatus').className = 'connection-status status-connected';
+                        isConnected = true;
+                    } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+                        document.getElementById('friendStatus').textContent = 'Disconnected';
+                        document.getElementById('friendStatus').className = 'connection-status status-disconnected';
+                        isConnected = false;
+                    }
+                };
+
+                // Start signaling (host creates offer)
                 if (isHost) {
                     const offer = await peerConnection.createOffer();
                     await peerConnection.setLocalDescription(offer);
@@ -1088,33 +1090,40 @@
                         offer: offer
                     });
                 }
-
-                //to handle signaling messages:
+                
+                // Listen for signaling messages from Firebase
                 signaling.receive(roomCode, async (message) => {
                     if (!peerConnection) {
                         console.error("peerConnection not initialized");
                         return;
                     }
-
-                    if (message.type === 'offer') {
-                        //if you are not the host, respond to the offer
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer));
-                        const answer = await peerConnection.createAnswer();
-                        signaling.send(roomCode, {
-                            type: 'answer',
-                            answer: answer
-                        });
-
-                    } else if (message.type === 'answer') {
-                        //if you are the host, set the answer
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer));
-
-                    } else if (message.type === 'ice-candidate') {
-                        //add ice candidate
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
+                    
+                    try {
+                        if (message.type === 'offer' && !isHost) {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer));
+                            const answer = await peerConnection.createAnswer();
+                            await peerConnection.setLocalDescription(answer);
+                            signaling.send(roomCode, {
+                                type: 'answer',
+                                answer: answer
+                            });
+                        
+                        } else if (message.type === 'answer' && isHost) {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer));
+                        
+                        } else if (message.type === 'ice-candidate') {
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
+                        }
+                    } catch (error) {
+                        console.error('Error handling signaling message:', error);
                     }
                 });
-                
+            
+            } catch (error) {
+                console.error('WebRTC initialization failed:', error);
+                throw error;
+            }
+        }
 
         // Handle signaling messages
         async function handleSignalingMessage(message) {
