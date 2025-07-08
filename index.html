@@ -621,6 +621,56 @@
                 font-size: 3rem;
             }
         }
+        @media (max-width: 480px) {
+            .home-container, .setup-container, .camera-container, .strip-container {
+                padding: 20px;
+                margin: 10px;
+            }
+            
+            .video-container {
+                height: 200px;
+            }
+            
+            .controls {
+                gap: 10px;
+            }
+            
+            .control-group {
+                min-width: 120px;
+            }
+            
+            select, button {
+                font-size: 14px;
+                padding: 8px 12px;
+            }
+            
+            .strip-photo {
+                width: 120px;
+                height: 96px;
+            }
+            
+            .combined-photo {
+                width: 240px;
+                height: 120px;
+            }
+        }
+        
+        /* Touch-friendly buttons */
+        @media (hover: none) {
+            .mode-option:hover,
+            .setup-option:hover,
+            select:hover,
+            button:hover {
+                transform: none;
+            }
+            
+            .mode-option:active,
+            .setup-option:active,
+            select:active,
+            button:active {
+                transform: scale(0.95);
+            }
+        }
     </style>
     <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
@@ -788,6 +838,25 @@
             </div>
         </div>
 
+        //strip filters 
+        <div class="control-group">
+            <label class="control-label">Background</label>
+            <select id="backgroundSelect">
+                <option value="none">None</option>
+                <option value="hearts">Hearts</option>
+                <option value="stars">Stars</option>
+                <option value="gradient">Gradient</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label class="control-label">Stickers</label>
+            <select id="stickerSelect">
+                <option value="none">None</option>
+                <option value="cute">Cute</option>
+                <option value="party">Party</option>
+                <option value="love">Love</option>
+            </select>
+        </div>
         <!-- Strip Page -->
         <div class="page" id="stripPage">
             <div class="strip-container">
@@ -1004,9 +1073,10 @@
             try {
                 const constraints = {
                     video: { 
-                        width: { ideal: 640 }, 
-                        height: { ideal: 480 },
-                        facingMode: 'user'
+                        width: { ideal: 640, min: 320 }, 
+                        height: { ideal: 480, min: 240 },
+                        facingMode: 'user',
+                        frameRate: { ideal: 30, max: 30 }
                     },
                     audio: false
                 };
@@ -1075,11 +1145,10 @@
                         document.getElementById('friendStatus').className = 'connection-status status-connected';
                         isConnected = true;
                     } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
-                        document.getElementById('friendStatus').textContent = 'Disconnected';
-                        document.getElementById('friendStatus').className = 'connection-status status-disconnected';
-                        isConnected = false;
-                    }
-                };
+                        document.getElementById('friendStatus').textContent = 'Disconnected';document.getElementById('friendStatus').className = 'connection-status status-disconnected';
+        isConnected = false;
+    }
+};
 
                 // Start signaling (host creates offer)
                 if (isHost) {
@@ -1432,7 +1501,37 @@
                 ctx.putImageData(imageData, 0, 0);
             }
         }
-
+        document.getElementById('backgroundSelect').addEventListener('change', updateBackground);
+        document.getElementById('stickerSelect').addEventListener('change', updateStickers);
+        
+        function updateBackground() {
+            const background = document.getElementById('backgroundSelect').value;
+            const videoContainers = document.querySelectorAll('.video-container');
+            
+            videoContainers.forEach(container => {
+                switch(background) {
+                    case 'hearts':
+                        container.style.background = 'radial-gradient(circle, #ff69b4 1px, transparent 1px), radial-gradient(circle, #ff1493 1px, transparent 1px)';
+                        container.style.backgroundSize = '20px 20px, 40px 40px';
+                        break;
+                    case 'stars':
+                        container.style.background = 'radial-gradient(circle, #ffd700 1px, transparent 1px)';
+                        container.style.backgroundSize = '25px 25px';
+                        break;
+                    case 'gradient':
+                        container.style.background = 'linear-gradient(45deg, #ff9a9e, #fecfef)';
+                        break;
+                    default:
+                        container.style.background = '#000';
+                }
+            });
+        }
+        
+        function updateStickers() {
+            const sticker = document.getElementById('stickerSelect').value;
+            // This will be implemented in the capture function
+            }
+            
         // Utility functions
         function wait(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
@@ -1456,57 +1555,105 @@
             return canvas.toDataURL('image/jpeg', 0.8);
         }
 
-        // Download functionality
+        // Download functionality - creates actual photo strips
         function downloadStrips() {
-            const zip = new JSZip();
-            
-            // Add individual photos
-            myPhotos.forEach((photo, index) => {
-                const base64Data = photo.split(',')[1];
-                zip.file(`my_photo_${index + 1}.jpg`, base64Data, { base64: true });
-            });
-            
-            if (appMode === 'friends') {
-                friendPhotos.forEach((photo, index) => {
-                    const base64Data = photo.split(',')[1];
-                    zip.file(`friend_photo_${index + 1}.jpg`, base64Data, { base64: true });
-                });
+            if (appMode === 'individual') {
+                // Create individual photo strip
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
                 
-                // Add combined photos
-                for (let i = 1; i <= 4; i++) {
-                    const img = document.getElementById(`combinedPhoto${i}`);
-                    if (img.src) {
-                        const base64Data = img.src.split(',')[1];
-                        zip.file(`combined_photo_${i}.jpg`, base64Data, { base64: true });
-                    }
-                }
-            }
-            
-            zip.generateAsync({ type: 'blob' }).then(function(content) {
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(content);
-                a.download = 'pic-a-booth-photos.zip';
-                a.click();
-            });
-        }
-
-        // Alternative download for browsers without JSZip
-        function downloadStrips() {
-            // Download individual photos
-            myPhotos.forEach((photo, index) => {
-                const a = document.createElement('a');
-                a.href = photo;
-                a.download = `my_photo_${index + 1}.jpg`;
-                a.click();
-            });
-            
-            if (appMode === 'friends') {
-                friendPhotos.forEach((photo, index) => {
-                    const a = document.createElement('a');
-                    a.href = photo;
-                    a.download = `friend_photo_${index + 1}.jpg`;
-                    a.click();
+                canvas.width = 400;
+                canvas.height = 800;
+                
+                // White background
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw photos
+                myPhotos.forEach((photo, index) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        ctx.drawImage(img, 50, 50 + (index * 180), 300, 150);
+                        
+                        // Add border
+                        ctx.strokeStyle = '#ff69b4';
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(50, 50 + (index * 180), 300, 150);
+                        
+                        if (index === 3) {
+                            // Add title
+                            ctx.fillStyle = '#ff1493';
+                            ctx.font = 'bold 24px Comic Sans MS';
+                            ctx.textAlign = 'center';
+                            ctx.fillText('Pic-a-Boo(th)', canvas.width / 2, 30);
+                            
+                            // Download
+                            const a = document.createElement('a');
+                            a.href = canvas.toDataURL('image/jpeg', 0.9);
+                            a.download = 'pic-a-booth-strip.jpg';
+                            a.click();
+                        }
+                    };
+                    img.src = photo;
                 });
+            } else {
+                // Create combined photo strip
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                canvas.width = 800;
+                canvas.height = 800;
+                
+                // White background
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw combined photos
+                for (let i = 0; i < 4; i++) {
+                    const myImg = new Image();
+                    const friendImg = new Image();
+                    
+                    let imagesLoaded = 0;
+                    
+                    const drawStrip = () => {
+                        imagesLoaded++;
+                        if (imagesLoaded === 2) {
+                            const yPos = 50 + (i * 180);
+                            
+                            // Draw my photo (left)
+                            ctx.drawImage(myImg, 50, yPos, 300, 150);
+                            
+                            // Draw friend's photo (right)
+                            ctx.drawImage(friendImg, 450, yPos, 300, 150);
+                            
+                            // Add borders
+                            ctx.strokeStyle = '#ff69b4';
+                            ctx.lineWidth = 3;
+                            ctx.strokeRect(50, yPos, 300, 150);
+                            ctx.strokeRect(450, yPos, 300, 150);
+                            
+                            if (i === 3) {
+                                // Add title
+                                ctx.fillStyle = '#ff1493';
+                                ctx.font = 'bold 24px Comic Sans MS';
+                                ctx.textAlign = 'center';
+                                ctx.fillText('Pic-a-Boo(th)', canvas.width / 2, 30);
+                                
+                                // Download
+                                const a = document.createElement('a');
+                                a.href = canvas.toDataURL('image/jpeg', 0.9);
+                                a.download = 'pic-a-booth-friends-strip.jpg';
+                                a.click();
+                            }
+                        }
+                    };
+                    
+                    myImg.onload = drawStrip;
+                    friendImg.onload = drawStrip;
+                    
+                    myImg.src = myPhotos[i] || createPlaceholderImage();
+                    friendImg.src = friendPhotos[i] || createPlaceholderImage();
+                }
             }
         }
 
